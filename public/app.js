@@ -1,11 +1,10 @@
 /**
- * InPost Cut-off Zones Client Controller
- * Renders spatial zone partitions, clusters lockers, and provides instant postcode lookup.
+ * InPost Cut-off Zones Client Controller (MapLibre GL JS Engine)
  */
 
 const zoneColors = {
   'A': '#10b981',
-  'B': '#0284c7',
+  'B': '#6366f1',
   'C': '#f59e0b',
   'D': '#ef4444'
 };
@@ -17,36 +16,44 @@ const zoneTimes = {
   'D': '13:00'
 };
 
-// Fixed fill opacity for spatial zone partitions
 const FIXED_OPACITY = 0.25;
 
-// Initialize base map instance
-const map = L.map('map', { 
-  center: [52.0688, 19.4797], 
-  zoom: 7,
-  zoomControl: false 
+const map = new maplibregl.Map({
+  container: 'map',
+  center: [19.4797, 52.0688],
+  zoom: 6,
+  style: {
+    version: 8,
+    glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
+    sources: {
+      'esri-tiles': {
+        type: 'raster',
+        tiles: [
+          'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}'
+        ],
+        tileSize: 256,
+        attribution: '&copy; InPost® &copy; Esri &copy; OpenStreetMap'
+      }
+    },
+    layers: [
+      {
+        id: 'esri-tiles-layer',
+        type: 'raster',
+        source: 'esri-tiles',
+        minzoom: 0,
+        maxzoom: 19
+      }
+    ]
+  }
 });
 
-L.control.zoom({ position: 'bottomright' }).addTo(map);
+map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
 
-L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
-  attribution: '&copy; InPost® &copy; OpenStreetMap',
-  maxZoom: 17
-}).addTo(map);
-
-// Reactive state tracking
+// Active filter state
 const activeZones = { 'A': true, 'B': true, 'C': true, 'D': true };
 const activeTypes = { 'locker': true, 'pop': true };
 
-const polygonLayers = {};
-const clusterGroups = {};
-const markersStore = { 
-  'A': { locker: [], pop: [] }, 
-  'B': { locker: [], pop: [] }, 
-  'C': { locker: [], pop: [] }, 
-  'D': { locker: [], pop: [] } 
-};
-
+let allPointsFeatures = [];
 let postcodesIndex = {};
 let searchMarker = null;
 
@@ -57,9 +64,7 @@ const inputEl = document.getElementById('postcode-input');
 const resultEl = document.getElementById('search-result');
 const clearBtn = document.getElementById('search-clear-btn');
 
-/**
- * Mobile drawer interaction controller
- */
+// Mobile drawer controls
 function toggleDrawer() {
   drawerEl.classList.toggle('collapsed');
 }
@@ -68,142 +73,226 @@ if (dragHandle) {
   dragHandle.addEventListener('click', toggleDrawer);
 }
 
-// Automatically collapse drawer on mobile drag to prioritize map visibility
 if (window.innerWidth <= 640) {
-  map.on('dragstart', () => {
-    drawerEl.classList.add('collapsed');
-  });
+  map.on('dragstart', () => drawerEl.classList.add('collapsed'));
 }
 
-// Auto-expand drawer when search input gains user focus
-inputEl.addEventListener('focus', () => {
-  drawerEl.classList.remove('collapsed');
-});
-
-// Custom point markers
-const lockerIcon = L.divIcon({ 
-  html: '<div class="point-dot dot-locker"></div>', 
-  className: 'custom-cluster-marker', 
-  iconSize: [9, 9], 
-  iconAnchor: [4.5, 4.5] 
-});
-
-const popIcon = L.divIcon({ 
-  html: '<div class="point-dot dot-pop"></div>', 
-  className: 'custom-cluster-marker', 
-  iconSize: [9, 9], 
-  iconAnchor: [4.5, 4.5] 
-});
+inputEl.addEventListener('focus', () => drawerEl.classList.remove('collapsed'));
 
 /**
- * Factory for creating optimized zone-specific cluster groups
- * @param {string} zone - Zone identifier ('A', 'B', 'C', 'D')
- * @returns {L.MarkerClusterGroup}
+ * Filter generator for WebGL layers
  */
-function createClusterGroup(zone) {
-  return L.markerClusterGroup({
-    chunkedLoading: true,
-    removeOutsideVisibleBounds: true,
-    maxClusterRadius: 50,
-    spiderfyOnMaxZoom: true,
-    showCoverageOnHover: false,
-    iconCreateFunction: function(cluster) {
-      const count = cluster.getChildCount();
-      const size = count >= 1000 ? 40 : (count >= 100 ? 34 : 28);
-      return L.divIcon({
-        html: `<div class="cluster-bubble cluster-${zone}" style="font-size:${size > 30 ? 12 : 11}px;">${count}</div>`,
-        className: 'custom-cluster-marker',
-        iconSize: [size, size],
-        iconAnchor: [size / 2, size / 2]
-      });
+function updateMapFilters() {
+  const allowedZones = Object.keys(activeZones).filter(z => activeZones[z]);
+  const allowedTypes = Object.keys(activeTypes).filter(t => activeTypes[t]);
+
+  // Update polygon fill and line visibility in GPU
+  const zoneFilter = ['in', ['get', 'z'], ['literal', allowedZones]];
+  if (map.getLayer('zones-fill')) map.setFilter('zones-fill', zoneFilter);
+  if (map.getLayer('zones-line')) map.setFilter('zones-line', zoneFilter);
+
+  // Update points source dataset to dynamically recalculate supercluster in WebWorker
+  const filtered = allPointsFeatures.filter(f => 
+    activeZones[f.properties.z] && activeTypes[f.properties.t]
+  );
+
+  const source = map.getSource('points-source');
+  if (source) {
+    source.setData({
+      type: 'FeatureCollection',
+      features: filtered
+    });
+  }
+}
+
+map.on('load', async () => {
+  // 1. Load and configure spatial zone boundaries
+  map.addSource('zones-source', {
+    type: 'geojson',
+    data: 'data/zones.geojson'
+  });
+
+  map.addLayer({
+    id: 'zones-fill',
+    type: 'fill',
+    source: 'zones-source',
+    paint: {
+      'fill-color': [
+        'match',
+        ['get', 'z'],
+        'A', zoneColors['A'],
+        'B', zoneColors['B'],
+        'C', zoneColors['C'],
+        'D', zoneColors['D'],
+        '#cccccc'
+      ],
+      'fill-opacity': FIXED_OPACITY
     }
   });
-}
 
-/**
- * Synchronizes visible markers in a cluster group based on active filters
- * @param {string} zone - Zone identifier ('A', 'B', 'C', 'D')
- */
-function updateZoneClusters(zone) {
-  const group = clusterGroups[zone];
-  if (!group) return;
-  group.clearLayers();
+  map.addLayer({
+    id: 'zones-line',
+    type: 'line',
+    source: 'zones-source',
+    paint: {
+      'line-color': [
+        'match',
+        ['get', 'z'],
+        'A', zoneColors['A'],
+        'B', zoneColors['B'],
+        'C', zoneColors['C'],
+        'D', zoneColors['D'],
+        '#cccccc'
+      ],
+      'line-width': 1.2,
+      'line-opacity': 0.8
+    }
+  });
 
-  if (!activeZones[zone]) return;
+  // 2. Fetch point locations and construct internal GeoJSON representation
+  const res = await fetch('data/points.json');
+  const pointsData = await res.json();
 
-  const toAdd = [];
-  if (activeTypes.locker) toAdd.push(...markersStore[zone].locker);
-  if (activeTypes.pop) toAdd.push(...markersStore[zone].pop);
-  group.addLayers(toAdd);
-}
+  ['A', 'B', 'C', 'D'].forEach(zone => {
+    const items = pointsData[zone] || [];
+    const badge = document.getElementById(`count-${zone.toLowerCase()}`);
+    if (badge) badge.innerText = items.length.toLocaleString('pl-PL');
 
-// 1. Fetch and render zone boundaries
-fetch('data/zones.geojson')
-  .then(res => res.json())
-  .then(data => {
-    data.features.forEach(feature => {
-      const zone = feature.properties.z;
-      const layer = L.geoJSON(feature, {
-        interactive: false,
-        style: {
-          fillColor: zoneColors[zone],
-          fillOpacity: FIXED_OPACITY,
-          color: zoneColors[zone],
-          weight: 1.2,
-          opacity: 0.8
+    items.forEach(pt => {
+      allPointsFeatures.push({
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: [pt[1], pt[0]] // lon, lat
+        },
+        properties: {
+          n: pt[2],
+          s: pt[3],
+          p: pt[4],
+          c: pt[5],
+          t: pt[6], // 'locker' or 'pop'
+          z: zone
         }
       });
-      polygonLayers[zone] = layer;
-      layer.addTo(map);
     });
   });
 
-// 2. Fetch point payload (lockers and PUDO locations)
-fetch('data/points.json')
-  .then(res => res.json())
-  .then(data => {
-    ['A', 'B', 'C', 'D'].forEach(zone => {
-      const group = createClusterGroup(zone);
-      clusterGroups[zone] = group;
-      map.addLayer(group);
+  // Add clustered GeoJSON source directly to WebGL engine
+  map.addSource('points-source', {
+    type: 'geojson',
+    data: {
+      type: 'FeatureCollection',
+      features: allPointsFeatures
+    },
+    cluster: true,
+    clusterMaxZoom: 14,
+    clusterRadius: 70
+  });
 
-      const items = data[zone] || [];
-      const badge = document.getElementById(`count-${zone.toLowerCase()}`);
-      if (badge) badge.innerText = items.length.toLocaleString('pl-PL');
+  // Layer: Cluster Circles
+    map.addLayer({
+    id: 'clusters',
+    type: 'circle',
+    source: 'points-source',
+    filter: ['has', 'point_count'],
+    paint: {
+      'circle-color': '#1e293b',
+      'circle-radius': [
+        'step',
+        ['get', 'point_count'],
+        14,
+        25, 17,
+        100, 21,
+        500, 25
+      ],
+      'circle-stroke-width': 2,
+      'circle-stroke-color': '#ffffff'
+    }
+  });
 
-      items.forEach(pt => {
-        const isPop = pt[6] === 'pop';
-        const typeLabel = isPop ? 'PaczkoPunkt®' : 'Paczkomat®';
-        const marker = L.marker([pt[0], pt[1]], { icon: isPop ? popIcon : lockerIcon });
-        marker.bindPopup(`
-          <div style="font-size:13px; line-height:1.4;">
-            <div style="font-size:10px; font-weight:700; text-transform:uppercase; color:#64748b; margin-bottom:2px;">
-              ${typeLabel}
-            </div>
-            <b style="font-size:14px; color:#0f172a;">${pt[2]}</b><br>
-            ${pt[3]}, ${pt[4]} ${pt[5]}<br>
-            <span style="display:inline-block; margin-top:5px; padding:2px 6px; border-radius:4px; background:${zoneColors[zone]}; color:#fff; font-weight:bold; font-size:11px;">
-              Strefa ${zone} (godz. graniczna ${zoneTimes[zone]})
-            </span>
+  // Layer: Cluster Count Labels
+  map.addLayer({
+    id: 'cluster-count',
+    type: 'symbol',
+    source: 'points-source',
+    filter: ['has', 'point_count'],
+    layout: {
+      'text-field': ['get', 'point_count_abbreviated'],
+      'text-size': 11.5,
+      'text-font': ['Noto Sans Bold']
+    },
+    paint: {
+      'text-color': '#ffffff'
+    }
+  });
+
+  // Layer: Individual Unclustered Points
+  map.addLayer({
+    id: 'unclustered-points',
+    type: 'circle',
+    source: 'points-source',
+    filter: ['!', ['has', 'point_count']],
+    paint: {
+      'circle-color': [
+        'match',
+        ['get', 't'],
+        'pop', '#7c3aed',
+        '#111827'
+      ],
+      'circle-radius': 4.5,
+      'circle-stroke-width': 1.5,
+      'circle-stroke-color': '#ffffff'
+    }
+  });
+
+  // Cluster Click: Smooth zoom into cluster boundary
+  map.on('click', 'clusters', async (e) => {
+    const features = map.queryRenderedFeatures(e.point, { layers: ['clusters'] });
+    const clusterId = features[0].properties.cluster_id;
+    const zoom = await map.getSource('points-source').getClusterExpansionZoom(clusterId);
+    map.easeTo({ center: features[0].geometry.coordinates, zoom });
+  });
+
+  // Unclustered Point Click: Native MapLibre Popup
+  map.on('click', 'unclustered-points', (e) => {
+    const props = e.features[0].properties;
+    const coords = e.features[0].geometry.coordinates.slice();
+    const isPop = props.t === 'pop';
+    const typeLabel = isPop ? 'PaczkoPunkt®' : 'Paczkomat®';
+    const z = props.z;
+
+    new maplibregl.Popup({ offset: 10 })
+      .setLngLat(coords)
+      .setHTML(`
+        <div style="font-size:13px; line-height:1.4;">
+          <div style="font-size:10px; font-weight:700; text-transform:uppercase; color:#64748b; margin-bottom:2px;">
+            ${typeLabel}
           </div>
-        `);
-
-        if (isPop) markersStore[zone].pop.push(marker);
-        else markersStore[zone].locker.push(marker);
-      });
-
-      updateZoneClusters(zone);
-    });
+          <b style="font-size:14px; color:#0f172a;">${props.n}</b><br>
+          ${props.s}, ${props.p} ${props.c}<br>
+          <span style="display:inline-block; margin-top:5px; padding:2px 6px; border-radius:4px; background:${zoneColors[z]}; color:#fff; font-weight:bold; font-size:11px;">
+            Strefa ${z} (godz. graniczna ${zoneTimes[z]})
+          </span>
+        </div>
+      `)
+      .addTo(map);
   });
 
-// 3. Load pre-indexed postal code lookup table
+  // Pointer cursor interactions
+  map.on('mouseenter', 'clusters', () => map.getCanvas().style.cursor = 'pointer');
+  map.on('mouseleave', 'clusters', () => map.getCanvas().style.cursor = '');
+  map.on('mouseenter', 'unclustered-points', () => map.getCanvas().style.cursor = 'pointer');
+  map.on('mouseleave', 'unclustered-points', () => map.getCanvas().style.cursor = '');
+});
+
+// Load postal code lookup table
 fetch('data/postcodes_lookup.json')
   .then(res => res.json())
   .then(data => {
     postcodesIndex = data;
   });
 
-// 4. Postal code input formatter and search execution
+// Postcode search input controller
 inputEl.addEventListener('input', (e) => {
   let cleaned = e.target.value.replace(/[^\d-]/g, '');
   let digits = cleaned.replace(/-/g, '').slice(0, 5);
@@ -211,9 +300,7 @@ inputEl.addEventListener('input', (e) => {
   let formatted = '';
   if (digits.length <= 2) {
     formatted = digits;
-    if (cleaned.endsWith('-') && digits.length === 2) {
-      formatted = digits + '-';
-    }
+    if (cleaned.endsWith('-') && digits.length === 2) formatted = digits + '-';
   } else {
     formatted = digits.slice(0, 2) + '-' + digits.slice(2);
   }
@@ -225,7 +312,10 @@ inputEl.addEventListener('input', (e) => {
     executeSearch(formatted);
   } else {
     resultEl.style.display = 'none';
-    if (searchMarker) map.removeLayer(searchMarker);
+    if (searchMarker) {
+      searchMarker.remove();
+      searchMarker = null;
+    }
   }
 });
 
@@ -233,13 +323,12 @@ clearBtn.addEventListener('click', () => {
   inputEl.value = '';
   clearBtn.style.display = 'none';
   resultEl.style.display = 'none';
-  if (searchMarker) map.removeLayer(searchMarker);
+  if (searchMarker) {
+    searchMarker.remove();
+    searchMarker = null;
+  }
 });
 
-/**
- * Executes postal code lookup and smoothly pans map to target coordinates
- * @param {string} postcodeFormatted - Formatted postcode string (e.g. "01-234")
- */
 function executeSearch(postcodeFormatted) {
   const norm = postcodeFormatted.replace('-', '');
   const entry = postcodesIndex[norm];
@@ -258,16 +347,12 @@ function executeSearch(postcodeFormatted) {
       </div>
     `;
 
-    map.flyTo([lat, lon], 13, { duration: 1.2 });
+    map.flyTo({ center: [lon, lat], zoom: 13, speed: 1.4 });
 
-    if (searchMarker) map.removeLayer(searchMarker);
-    searchMarker = L.circleMarker([lat, lon], {
-      radius: 9,
-      fillColor: zoneColors[zone],
-      color: '#ffffff',
-      weight: 3,
-      fillOpacity: 0.95
-    }).addTo(map);
+    if (searchMarker) searchMarker.remove();
+    searchMarker = new maplibregl.Marker({ color: zoneColors[zone] })
+      .setLngLat([lon, lat])
+      .addTo(map);
 
   } else {
     resultEl.className = 'search-result-card error';
@@ -276,24 +361,13 @@ function executeSearch(postcodeFormatted) {
   }
 }
 
-/**
- * Toggles visibility of spatial zone boundaries
- * @param {string} zone - Zone identifier ('A', 'B', 'C', 'D')
- * @param {boolean} isVisible
- */
+// Global filter event handlers
 function toggleZone(zone, isVisible) {
   activeZones[zone] = isVisible;
-  if (isVisible && polygonLayers[zone]) map.addLayer(polygonLayers[zone]);
-  else if (!isVisible && polygonLayers[zone]) map.removeLayer(polygonLayers[zone]);
-  updateZoneClusters(zone);
+  updateMapFilters();
 }
 
-/**
- * Toggles visibility of specific point categories (Lockers vs PUDO)
- * @param {string} type - Point category identifier ('locker' or 'pop')
- * @param {boolean} isVisible
- */
 function togglePointType(type, isVisible) {
   activeTypes[type] = isVisible;
-  ['A', 'B', 'C', 'D'].forEach(zone => updateZoneClusters(zone));
+  updateMapFilters();
 }

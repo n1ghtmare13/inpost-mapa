@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Mapa godzin granicznych InPost®</title>
   
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+  <!-- MapLibre GL CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -14,7 +15,6 @@
 
   <!-- Floating Application Drawer -->
   <div class="app-drawer" id="drawer">
-    <!-- Interactive mobile sheet drag handle -->
     <div class="drawer-drag-handle" id="dragHandle" role="button" aria-label="Toggle drawer">
       <span class="handle-bar"></span>
     </div>
@@ -97,11 +97,11 @@
         <span class="filter-label">Widok na mapie:</span>
         <div class="toggle-group">
           <label class="pill-toggle">
-            <input type="checkbox" checked onchange="togglePointType('locker', this.checked)">
+            <input type="checkbox" id="filter-locker" checked onchange="togglePointType('locker', this.checked)">
             <span>Paczkomat®</span>
           </label>
           <label class="pill-toggle">
-            <input type="checkbox" checked onchange="togglePointType('pop', this.checked)">
+            <input type="checkbox" id="filter-pop" checked onchange="togglePointType('pop', this.checked)">
             <span>PaczkoPunkt®</span>
           </label>
         </div>
@@ -112,8 +112,8 @@
     </footer>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <!-- MapLibre GL JS -->
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
