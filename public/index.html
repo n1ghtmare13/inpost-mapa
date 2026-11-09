@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Mapa godzin granicznych InPost®</title>
+  
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div id="map"></div>
+
+  <!-- Floating Application Drawer -->
+  <div class="app-drawer" id="drawer">
+    <!-- Interactive mobile sheet drag handle -->
+    <div class="drawer-drag-handle" id="dragHandle" role="button" aria-label="Toggle drawer">
+      <span class="handle-bar"></span>
+    </div>
+
+    <!-- Header & Search Interface -->
+    <header class="app-header">
+      <div class="brand-row">
+        <span class="inpost-logo-badge">InPost®</span>
+        <h1 class="app-title">Godziny graniczne</h1>
+      </div>
+      <p class="app-subtitle">Maksymalny czas nadania przesyłki dla doręczenia następnego dnia.</p>
+
+      <!-- Postcode Search Bar -->
+      <div class="search-box">
+        <svg class="search-icon" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clip-rule="evenodd" />
+        </svg>
+        <input 
+          type="text" 
+          id="postcode-input" 
+          placeholder="Wpisz kod pocztowy (np. 01-234)" 
+          maxlength="6" 
+          inputmode="numeric"
+          autocomplete="off" 
+          spellcheck="false"
+        >
+        <button id="search-clear-btn" class="clear-btn" style="display: none;">&times;</button>
+      </div>
+
+      <!-- Dynamic Search Result Feedback -->
+      <div id="search-result" class="search-result-card" style="display: none;"></div>
+    </header>
+
+    <!-- Cut-off Zone Toggles -->
+    <section class="section-zones">
+      <div class="section-heading">Strefy i godziny nadań</div>
+      
+      <div class="zone-grid">
+        <label class="zone-card zone-a" for="toggle-a">
+          <input type="checkbox" id="toggle-a" checked onchange="toggleZone('A', this.checked)">
+          <div class="zone-info">
+            <span class="zone-code">Strefa A</span>
+            <span class="zone-time">godz. graniczna <b>16:00</b></span>
+          </div>
+          <span class="badge" id="count-a">-</span>
+        </label>
+
+        <label class="zone-card zone-b" for="toggle-b">
+          <input type="checkbox" id="toggle-b" checked onchange="toggleZone('B', this.checked)">
+          <div class="zone-info">
+            <span class="zone-code">Strefa B</span>
+            <span class="zone-time">godz. graniczna <b>15:00</b></span>
+          </div>
+          <span class="badge" id="count-b">-</span>
+        </label>
+
+        <label class="zone-card zone-c" for="toggle-c">
+          <input type="checkbox" id="toggle-c" checked onchange="toggleZone('C', this.checked)">
+          <div class="zone-info">
+            <span class="zone-code">Strefa C</span>
+            <span class="zone-time">godz. graniczna <b>14:00</b></span>
+          </div>
+          <span class="badge" id="count-c">-</span>
+        </label>
+
+        <label class="zone-card zone-d" for="toggle-d">
+          <input type="checkbox" id="toggle-d" checked onchange="toggleZone('D', this.checked)">
+          <div class="zone-info">
+            <span class="zone-code">Strefa D</span>
+            <span class="zone-time">godz. graniczna <b>13:00</b></span>
+          </div>
+          <span class="badge" id="count-d">-</span>
+        </label>
+      </div>
+    </section>
+
+    <!-- Point Type Filters and Legal Attribution -->
+    <footer class="app-footer">
+      <div class="filter-row">
+        <span class="filter-label">Widok na mapie:</span>
+        <div class="toggle-group">
+          <label class="pill-toggle">
+            <input type="checkbox" checked onchange="togglePointType('locker', this.checked)">
+            <span>Paczkomat®</span>
+          </label>
+          <label class="pill-toggle">
+            <input type="checkbox" checked onchange="togglePointType('pop', this.checked)">
+            <span>PaczkoPunkt®</span>
+          </label>
+        </div>
+      </div>
+      <div class="legal-notice">
+        Serwis niezależny, o charakterze wyłącznie informacyjnym. Znaki towarowe InPost®, Paczkomat® oraz PaczkoPunkt® należą do Integer.pl SA / InPost Sp. z o.o.
+      </div>
+    </footer>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

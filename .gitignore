@@ -1,0 +1,9 @@
+POLSKA.csv
+data_raw/mismatches_sample.csv
+__pycache__/
+*.py[cod]
+.venv/
+.uv/
+.DS_Store
+Thumbs.db
+desktop.ini
