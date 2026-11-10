@@ -5,10 +5,10 @@
   --text-secondary: #475569;
   --border-ui: #e2e8f0;
   
-  --zone-a: #10b981;
-  --zone-b: #6366f1;
-  --zone-c: #f59e0b;
-  --zone-d: #ef4444;
+  --zone-a: #10b981; /* Emerald */
+  --zone-b: #6366f1; /* Indigo */
+  --zone-c: #f59e0b; /* Amber */
+  --zone-d: #e11d48; /* Carmine */
 }
 
 * {

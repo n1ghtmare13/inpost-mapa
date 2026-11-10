@@ -1,12 +1,12 @@
 /**
- * InPost Cut-off Zones Client Controller (MapLibre GL JS Engine)
+ * InPost Cut-off Zones Client Controller (MapLibre GL JS + OpenFreeMap Vector Engine)
  */
 
 const zoneColors = {
-  'A': '#10b981',
-  'B': '#6366f1',
-  'C': '#f59e0b',
-  'D': '#ef4444'
+  'A': '#10b981', // Emerald Green
+  'B': '#6366f1', // Indigo
+  'C': '#f59e0b', // Amber
+  'D': '#e11d48'  // Carmine
 };
 
 const zoneTimes = {
@@ -16,36 +16,20 @@ const zoneTimes = {
   'D': '13:00'
 };
 
-const FIXED_OPACITY = 0.25;
+const FIXED_OPACITY = 0.22;
 
+// Initialize WebGL Map with up-to-date vector tiles from OpenFreeMap (OSM)
 const map = new maplibregl.Map({
   container: 'map',
   center: [19.4797, 52.0688],
   zoom: 6,
-  style: {
-    version: 8,
-    glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
-    sources: {
-      'esri-tiles': {
-        type: 'raster',
-        tiles: [
-          'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}'
-        ],
-        tileSize: 256,
-        attribution: '&copy; InPost® &copy; Esri &copy; OpenStreetMap'
-      }
-    },
-    layers: [
-      {
-        id: 'esri-tiles-layer',
-        type: 'raster',
-        source: 'esri-tiles',
-        minzoom: 0,
-        maxzoom: 19
-      }
-    ]
-  }
+  style: 'https://tiles.openfreemap.org/styles/liberty',
+  dragRotate: false,      // Disables mouse right-click and Ctrl+drag rotation
+  pitchWithRotate: false, // Prevents 3D tilting
+  maxPitch: 0             // Strictly locks map to flat 2D
 });
+
+map.touchZoomRotate.disableRotation();
 
 map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
 
@@ -106,6 +90,16 @@ function updateMapFilters() {
 }
 
 map.on('load', async () => {
+  // Find the first symbol/label layer so polygon fills sit UNDER street & city labels
+  const layers = map.getStyle().layers;
+  let firstSymbolId;
+  for (let i = 0; i < layers.length; i++) {
+    if (layers[i].type === 'symbol') {
+      firstSymbolId = layers[i].id;
+      break;
+    }
+  }
+
   // 1. Load and configure spatial zone boundaries
   map.addSource('zones-source', {
     type: 'geojson',
@@ -128,7 +122,7 @@ map.on('load', async () => {
       ],
       'fill-opacity': FIXED_OPACITY
     }
-  });
+  }, firstSymbolId);
 
   map.addLayer({
     id: 'zones-line',
@@ -147,7 +141,7 @@ map.on('load', async () => {
       'line-width': 1.2,
       'line-opacity': 0.8
     }
-  });
+  }, firstSymbolId);
 
   // 2. Fetch point locations and construct internal GeoJSON representation
   const res = await fetch('data/points.json');
@@ -190,7 +184,7 @@ map.on('load', async () => {
   });
 
   // Layer: Cluster Circles
-    map.addLayer({
+  map.addLayer({
     id: 'clusters',
     type: 'circle',
     source: 'points-source',
@@ -245,7 +239,6 @@ map.on('load', async () => {
     }
   });
 
-  // Cluster Click: Smooth zoom into cluster boundary
   map.on('click', 'clusters', async (e) => {
     const features = map.queryRenderedFeatures(e.point, { layers: ['clusters'] });
     const clusterId = features[0].properties.cluster_id;
@@ -253,7 +246,6 @@ map.on('load', async () => {
     map.easeTo({ center: features[0].geometry.coordinates, zoom });
   });
 
-  // Unclustered Point Click: Native MapLibre Popup
   map.on('click', 'unclustered-points', (e) => {
     const props = e.features[0].properties;
     const coords = e.features[0].geometry.coordinates.slice();
