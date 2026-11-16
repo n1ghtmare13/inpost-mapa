@@ -31,6 +31,7 @@ jobs:
         with:
           version: "latest"
           enable-cache: true
+          cache-dependency-glob: "0*.py"
 
       - name: Run pipeline updates
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
