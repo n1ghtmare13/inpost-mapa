@@ -1,102 +1,78 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["patchright", "beautifulsoup4"]
+# dependencies = ["requests", "beautifulsoup4"]
 # ///
 
 import os
-import subprocess
-import sys
+import requests
 from bs4 import BeautifulSoup
-from patchright.sync_api import sync_playwright
 
+SCRAPER_API_URL = "https://api.scraperapi.com/"
 PAGE_URL = "https://inpost.pl/godziny-odbiorow"
 OUTPUT_DIR = "data_raw"
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "nog_current.csv")
-PROXY_URL = os.getenv("PROXY_URL")
+
+api_key = os.getenv("SCRAPER_API_KEY")
+if not api_key:
+    raise RuntimeError("Missing SCRAPER_API_KEY environment variable.")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
-def ensure_chromium() -> None:
-    subprocess.run(
-        [sys.executable, "-m", "patchright", "install", "chromium"],
-        check=True,
-    )
+def fetch_via_scraperapi(url: str, render_js: bool = False) -> requests.Response:
+    payload = {
+        "api_key": api_key,
+        "url": url,
+        "country_code": "pl",
+    }
+    if render_js:
+        payload["render"] = "true"
+
+    resp = requests.get(SCRAPER_API_URL, params=payload, timeout=90)
+    resp.raise_for_status()
+    return resp
 
 
 def main() -> None:
-    ensure_chromium()
+    print("1. Fetching InPost page via ScraperAPI to parse active CSV path...")
+    response = fetch_via_scraperapi(PAGE_URL, render_js=True)
 
-    launch_kwargs = {"headless": True}
-    if PROXY_URL:
-        print(f"Using proxy: {PROXY_URL}")
-        launch_kwargs["proxy"] = {"server": PROXY_URL}
+    soup = BeautifulSoup(response.text, "html.parser")
+    form = soup.find("form", class_="pickup--hours")
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(**launch_kwargs)
-        context = browser.new_context(
-            locale="pl-PL",
-            timezone_id="Europe/Warsaw",
-            viewport={"width": 1366, "height": 768},
-        )
-        page = context.new_page()
+    if not form:
+        raise RuntimeError("Could not find the 'pickup--hours' form on page.")
 
-        print("1. Opening InPost page in headless Chromium...")
-        resp = page.goto(PAGE_URL, wait_until="domcontentloaded", timeout=45000)
-        status = resp.status if resp else "unknown"
-        print(f" -> HTTP status: {status}, title: {page.title()!r}")
+    current_file = form.get("data-csv-file", "").strip()
+    new_file = form.get("data-new-csv-file", "").strip()
+    announcement = form.get("data-new-csv-info", "").strip()
 
-        try:
-            page.wait_for_selector("form.pickup--hours", state="attached", timeout=30000)
-        except Exception as exc:
-            print(f" -> Page snippet: {page.content()[:500]!r}")
-            raise RuntimeError(f"Form not found (HTTP {status}): {exc}") from exc
+    print(f" -> Current file reference : {current_file}")
+    if new_file:
+        print(f" -> Upcoming file reference: {new_file} ({announcement})")
 
-        soup = BeautifulSoup(page.content(), "html.parser")
-        form = soup.find("form", class_="pickup--hours")
-        if not form:
-            raise RuntimeError("Could not find the 'pickup--hours' form on page.")
+    target_path = new_file if new_file else current_file
+    if not target_path:
+        raise RuntimeError("No CSV file reference found in form attributes.")
 
-        current_file = form.get("data-csv-file", "").strip()
-        new_file = form.get("data-new-csv-file", "").strip()
-        announcement = form.get("data-new-csv-info", "").strip()
+    if target_path.startswith("http"):
+        file_url = target_path
+    elif target_path.startswith("/"):
+        file_url = f"https://inpost.pl{target_path}"
+    else:
+        file_url = f"https://inpost.pl/sites/default/files/{target_path}"
 
-        print(f" -> Current file reference : {current_file}")
-        if new_file:
-            print(f" -> Upcoming file reference: {new_file} ({announcement})")
+    print(f"2. Downloading CSV via ScraperAPI from: {file_url}")
+    csv_response = fetch_via_scraperapi(file_url, render_js=False)
 
-        target_path = new_file if new_file else current_file
-        if not target_path:
-            raise RuntimeError("No CSV file reference found in form attributes.")
+    content_type = csv_response.headers.get("content-type", "")
+    if "text/html" in content_type.lower():
+        raise RuntimeError("Received HTML instead of CSV (blocked by WAF).")
 
-        if target_path.startswith("http"):
-            file_url = target_path
-        elif target_path.startswith("/"):
-            file_url = f"https://inpost.pl{target_path}"
-        else:
-            file_url = f"https://inpost.pl/sites/default/files/{target_path}"
+    with open(OUTPUT_FILE, "wb") as f:
+        f.write(csv_response.content)
 
-        print(f"2. Downloading CSV from: {file_url}")
-        csv_response = context.request.get(
-            file_url,
-            headers={"Referer": PAGE_URL},
-            timeout=30000,
-        )
-
-        if not csv_response.ok:
-            raise RuntimeError(f"Failed to download CSV: HTTP {csv_response.status}")
-
-        content = csv_response.body()
-        content_type = csv_response.headers.get("content-type", "")
-        if "text/html" in content_type.lower():
-            raise RuntimeError("Received HTML instead of CSV (likely blocked by WAF).")
-
-        with open(OUTPUT_FILE, "wb") as f:
-            f.write(content)
-
-        browser.close()
-
-    size_kb = len(content) // 1024
+    size_kb = len(csv_response.content) // 1024
     print(f"Done. Saved to {OUTPUT_FILE} ({size_kb} KB).")
 
 
