@@ -363,3 +363,19 @@ function togglePointType(type, isVisible) {
   activeTypes[type] = isVisible;
   updateMapFilters();
 }
+
+fetch('data/nog_meta.json')
+  .then(res => res.ok ? res.json() : null)
+  .then(meta => {
+    if (!meta || !meta.announcement || !meta.effective_date) return;
+
+    const todayStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    if (todayStr < meta.effective_date) {
+      const banner = document.getElementById('announcement-banner');
+      if (banner) {
+        banner.textContent = meta.announcement;
+        banner.style.display = 'block';
+      }
+    }
+  })
+  .catch(() => {});

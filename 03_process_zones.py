@@ -9,6 +9,8 @@ import time
 import geopandas as gpd
 import pandas as pd
 import shapely
+import shutil
+from datetime import date
 
 INPUT_LOCKERS = "data_raw/lockers_raw.json"
 INPUT_NOG = "data_raw/nog_current.csv"
@@ -16,7 +18,21 @@ DENSE_POINTS_PARQUET = "data_raw/prg_subsampled_points.parquet"
 BOUNDARY_CACHE = "data_raw/poland_boundary.geojson"
 OUTPUT_GEOJSON = "public/data/zones.geojson"
 OUTPUT_POINTS = "public/data/points.json"
+UPCOMING_NOG = "data_raw/nog_upcoming.csv"
+META_FILE = "public/data/nog_meta.json"
 
+if os.path.exists(UPCOMING_NOG) and os.path.exists(META_FILE):
+    with open(META_FILE, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+    eff_str = meta.get("effective_date")
+    if eff_str and date.today() >= date.fromisoformat(eff_str):
+        print(f" -> Activating scheduled NOG file (effective {eff_str})...")
+        shutil.move(UPCOMING_NOG, INPUT_NOG)
+        meta["announcement"] = None
+        meta["effective_date"] = None
+        with open(META_FILE, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+            
 os.makedirs("public/data", exist_ok=True)
 os.makedirs("data_raw", exist_ok=True)
 
