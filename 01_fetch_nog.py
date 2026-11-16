@@ -37,6 +37,8 @@ def main() -> None:
 
         print("1. Opening InPost page in headless Chromium...")
         page.goto(PAGE_URL, wait_until="domcontentloaded", timeout=45000)
+
+      
         page.wait_for_selector("form.pickup--hours", state="attached", timeout=30000)
 
         soup = BeautifulSoup(page.content(), "html.parser")
@@ -87,6 +89,5 @@ def main() -> None:
     print(f"Done. Saved to {OUTPUT_FILE} ({size_kb} KB).")
 
 
-if __name__ ==
-"__main__":
+if __name__ == "__main__":
     main()
