@@ -71,10 +71,16 @@ def parse_effective_date(info_text: str) -> date | None:
 
 def main() -> None:
     print("1. Fetching InPost page via ScraperAPI...")
-    response = fetch_via_scraperapi(PAGE_URL, render_js=True)
-
+    response = fetch_via_scraperapi(PAGE_URL, render_js=False)
     soup = BeautifulSoup(response.text, "html.parser")
     form = soup.find("form", class_="pickup--hours")
+
+    if not form:
+        print(" -> Form not found in static HTML, retrying with JS rendering...")
+        response = fetch_via_scraperapi(PAGE_URL, render_js=True)
+        soup = BeautifulSoup(response.text, "html.parser")
+        form = soup.find("form", class_="pickup--hours")
+
     if not form:
         raise RuntimeError("Could not find the 'pickup--hours' form on page.")
 
