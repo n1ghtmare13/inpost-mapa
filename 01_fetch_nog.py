@@ -12,6 +12,7 @@ from patchright.sync_api import sync_playwright
 PAGE_URL = "https://inpost.pl/godziny-odbiorow"
 OUTPUT_DIR = "data_raw"
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "nog_current.csv")
+PROXY_URL = os.getenv("PROXY_URL")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -26,8 +27,13 @@ def ensure_chromium() -> None:
 def main() -> None:
     ensure_chromium()
 
+    launch_kwargs = {"headless": True}
+    if PROXY_URL:
+        print(f"Using proxy: {PROXY_URL}")
+        launch_kwargs["proxy"] = {"server": PROXY_URL}
+
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(**launch_kwargs)
         context = browser.new_context(
             locale="pl-PL",
             timezone_id="Europe/Warsaw",
@@ -36,10 +42,15 @@ def main() -> None:
         page = context.new_page()
 
         print("1. Opening InPost page in headless Chromium...")
-        page.goto(PAGE_URL, wait_until="domcontentloaded", timeout=45000)
+        resp = page.goto(PAGE_URL, wait_until="domcontentloaded", timeout=45000)
+        status = resp.status if resp else "unknown"
+        print(f" -> HTTP status: {status}, title: {page.title()!r}")
 
-      
-        page.wait_for_selector("form.pickup--hours", state="attached", timeout=30000)
+        try:
+            page.wait_for_selector("form.pickup--hours", state="attached", timeout=30000)
+        except Exception as exc:
+            print(f" -> Page snippet: {page.content()[:500]!r}")
+            raise RuntimeError(f"Form not found (HTTP {status}): {exc}") from exc
 
         soup = BeautifulSoup(page.content(), "html.parser")
         form = soup.find("form", class_="pickup--hours")
