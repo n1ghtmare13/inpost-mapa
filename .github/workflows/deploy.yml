@@ -38,8 +38,12 @@ jobs:
         env:
           SCRAPER_API_KEY: ${{ secrets.SCRAPER_API_KEY }}
         run: |
-          uv run 01_fetch_nog.py
-          uv run 02_fetch_lockers.py
+          uv run 01_fetch_nog.py &
+	        PID1=$!
+          uv run 02_fetch_lockers.py &
+          PID2=$!
+          wait $PID1
+          wait $PID2
           uv run 03_process_zones.py
           
           git config --global user.name "github-actions[bot]"
