@@ -1,46 +1,61 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["requests", "beautifulsoup4"]
+# dependencies = ["curl_cffi", "beautifulsoup4"]
 # ///
 
 import os
-import requests
 from bs4 import BeautifulSoup
+from curl_cffi import requests
 
 PAGE_URL = "https://inpost.pl/godziny-odbiorow"
 OUTPUT_DIR = "data_raw"
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "nog_current.csv")
+PROXY_URL = os.getenv("PROXY_URL")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+proxies = {"http": PROXY_URL, "https": PROXY_URL} if PROXY_URL else None
 
-print("1. Fetching InPost page to parse active CSV path...")
-response = requests.get(PAGE_URL, headers=headers, timeout=15)
-response.raise_for_status()
+with requests.Session(impersonate="chrome", proxies=proxies) as session:
+    session.headers.update({
+        "Accept-Language": "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7",
+    })
 
-soup = BeautifulSoup(response.text, "html.parser")
-form = soup.find("form", class_="pickup--hours")
+    print("1. Fetching InPost page to parse active CSV path...")
+    response = session.get(PAGE_URL, timeout=20)
+    response.raise_for_status()
 
-if not form:
-    raise RuntimeError("Could not find the 'pickup--hours' form on page.")
+    soup = BeautifulSoup(response.text, "html.parser")
+    form = soup.find("form", class_="pickup--hours")
 
-current_file = form.get("data-csv-file", "").strip()
-new_file = form.get("data-new-csv-file", "").strip()
-announcement = form.get("data-new-csv-info", "").strip()
+    if not form:
+        raise RuntimeError("Could not find the 'pickup--hours' form on page.")
 
-print(f" -> Current file reference : {current_file}")
-if new_file:
-    print(f" -> Upcoming file reference: {new_file} ({announcement})")
+    current_file = form.get("data-csv-file", "").strip()
+    new_file = form.get("data-new-csv-file", "").strip()
+    announcement = form.get("data-new-csv-info", "").strip()
 
-target_path = new_file if new_file else current_file
-if not target_path:
-    raise RuntimeError("No CSV file reference found in form attributes.")
+    print(f" -> Current file reference : {current_file}")
+    if new_file:
+        print(f" -> Upcoming file reference: {new_file} ({announcement})")
 
-file_url = f"https://inpost.pl/sites/default/files/{target_path}"
+    target_path = new_file if new_file else current_file
+    if not target_path:
+        raise RuntimeError("No CSV file reference found in form attributes.")
 
-print(f"2. Downloading CSV from: {file_url}")
-csv_response = requests.get(file_url, headers=headers, timeout=30)
-csv_response.raise_for_status()
+    if target_path.startswith("http"):
+        file_url = target_path
+    elif target_path.startswith("/"):
+        file_url = f"https://inpost.pl{target_path}"
+    else:
+        file_url = f"https://inpost.pl/sites/default/files/{target_path}"
+
+    print(f"2. Downloading CSV from: {file_url}")
+    csv_response = session.get(
+        file_url,
+        headers={"Referer": PAGE_URL},
+        timeout=30,
+    )
+    csv_response.raise_for_status()
 
 with open(OUTPUT_FILE, "wb") as f:
     f.write(csv_response.content)
