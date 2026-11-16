@@ -36,23 +36,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Start Cloudflare WARP proxy
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        run: |
-          curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
-          echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
-          sudo apt-get update && sudo apt-get install -y cloudflare-warp
-          warp-cli --accept-tos registration new
-          warp-cli --accept-tos mode proxy
-          warp-cli --accept-tos proxy port 40000
-          warp-cli --accept-tos connect
-          sleep 3
-          curl -s -x socks5h://127.0.0.1:40000 https://www.cloudflare.com/cdn-cgi/trace | grep -E "ip=|warp="
-
       - name: Run pipeline updates
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         env:
-          PROXY_URL: socks5://127.0.0.1:40000
+          SCRAPER_API_KEY: ${{ secrets.SCRAPER_API_KEY }}
         run: |
           uv run 01_fetch_nog.py
           uv run 02_fetch_lockers.py
